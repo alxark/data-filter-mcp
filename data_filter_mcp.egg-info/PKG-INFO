@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: data-filter-mcp
+Version: 0.1.0
+Summary: Local MCP server for running restricted Python text filters over files
+Requires-Python: >=3.11
+Requires-Dist: mcp<2.0,>=1.12
+Requires-Dist: pydantic<3,>=2
+Requires-Dist: PyYAML<7,>=6
+Provides-Extra: dev
+Requires-Dist: pytest<9,>=8; extra == "dev"

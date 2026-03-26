@@ -1,0 +1,2 @@
+[console_scripts]
+data-filter-mcp = data_filter_mcp.server:main
