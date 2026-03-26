@@ -6,12 +6,29 @@ build-backend = "setuptools.build_meta"
 name = "data-filter-mcp"
 version = "0.1.0"
 description = "Local MCP server for running restricted Python text filters over files"
+readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+authors = [
+  { name = "Aleksei Arakelian" },
+]
+keywords = ["mcp", "model-context-protocol", "filter", "python", "server"]
+classifiers = [
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
 dependencies = [
   "mcp>=1.12,<2.0",
   "pydantic>=2,<3",
   "PyYAML>=6,<7",
 ]
+
+[project.urls]
+Homepage = "https://github.com/alxark/data-filter-mcp"
+Repository = "https://github.com/alxark/data-filter-mcp"
+Issues = "https://github.com/alxark/data-filter-mcp/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -24,5 +41,5 @@ data-filter-mcp = "data_filter_mcp.server:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-[tool.setuptools]
-packages = ["data_filter_mcp", "data_filter_mcp.loaders"]
+[tool.setuptools.packages.find]
+include = ["data_filter_mcp*"]

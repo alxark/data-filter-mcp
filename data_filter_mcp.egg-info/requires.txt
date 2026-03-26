@@ -1,6 +1,0 @@
-mcp<2.0,>=1.12
-pydantic<3,>=2
-PyYAML<7,>=6
-
-[dev]
-pytest<9,>=8

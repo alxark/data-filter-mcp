@@ -8,6 +8,39 @@ Local MCP server that registers restricted Python filters and runs them against 
 - `run_filter` loads a local file, passes the loaded document into `filter_item(data)`, and returns the text from `result_text`
 - Registered filters live only in memory and expire automatically based on server TTL settings
 
+## Run with uvx
+
+After publishing to PyPI, start the server with:
+
+```bash
+uvx data-filter-mcp --filter-ttl-seconds 3600 --cleanup-interval-seconds 60
+```
+
+Show the available CLI flags with:
+
+```bash
+uvx data-filter-mcp --help
+```
+
+Example MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "data-filter": {
+      "command": "uvx",
+      "args": [
+        "data-filter-mcp",
+        "--filter-ttl-seconds",
+        "3600",
+        "--cleanup-interval-seconds",
+        "60"
+      ]
+    }
+  }
+}
+```
+
 ## Run locally
 
 ```bash
