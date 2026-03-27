@@ -24,12 +24,25 @@ class FilterService:
         filter_ttl_seconds: int = 3600,
         cleanup_interval_seconds: float = 60.0,
         now_provider=None,
+        workdirs: Sequence[str] | None = None,
     ) -> None:
         self._registry = FilterRegistry(
             filter_ttl_seconds=filter_ttl_seconds,
             cleanup_interval_seconds=cleanup_interval_seconds,
             now_provider=now_provider,
         )
+        self._workdirs: list[Path] = []
+        if workdirs:
+            for raw in workdirs:
+                p = Path(raw)
+                if not p.is_absolute():
+                    raise ValueError(f"workdir must be an absolute path: {raw}")
+                resolved = p.expanduser().resolve()
+                if not resolved.is_dir():
+                    raise ValueError(
+                        f"workdir is not an existing directory: {resolved}"
+                    )
+                self._workdirs.append(resolved)
 
     def start(self) -> None:
         self._registry.start_cleanup_thread()
@@ -55,6 +68,26 @@ class FilterService:
             ttl_seconds=self._registry.filter_ttl_seconds,
         )
 
+    def _resolve_allowed_file_path(self, file_path: str) -> Path:
+        candidate = Path(file_path)
+        if not candidate.is_absolute():
+            raise ValueError(f"file_path must be an absolute path: {file_path}")
+
+        resolved = candidate.expanduser().resolve()
+
+        if not resolved.exists():
+            raise FileNotFoundError(f"File not found: {resolved}")
+        if not resolved.is_file():
+            raise ValueError(f"Path is not a file: {resolved}")
+
+        if self._workdirs:
+            if not any(
+                resolved == wd or wd in resolved.parents for wd in self._workdirs
+            ):
+                raise ValueError(f"File path is outside allowed workdirs: {resolved}")
+
+        return resolved
+
     def run_filter(
         self,
         filter_id: str,
@@ -66,11 +99,7 @@ class FilterService:
         except (FilterNotFoundError, FilterExpiredError) as exc:
             raise ValueError(str(exc)) from exc
 
-        resolved_path = Path(file_path).expanduser().resolve()
-        if not resolved_path.exists():
-            raise FileNotFoundError(f"File not found: {resolved_path}")
-        if not resolved_path.is_file():
-            raise ValueError(f"Path is not a file: {resolved_path}")
+        resolved_path = self._resolve_allowed_file_path(file_path)
 
         document, resolved_file_type = load_document(resolved_path, file_type)
         result = entry.function(document)
@@ -220,6 +249,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=60.0,
         help="How often expired filters are swept from the registry",
     )
+    parser.add_argument(
+        "--workdir",
+        action="append",
+        default=None,
+        help=(
+            "Absolute directory allowed for file reads. "
+            "Repeat the flag to allow multiple directories. "
+            "If omitted, no directory restrictions are applied."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -228,6 +267,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     service = FilterService(
         filter_ttl_seconds=args.filter_ttl_seconds,
         cleanup_interval_seconds=args.cleanup_interval_seconds,
+        workdirs=args.workdir,
     )
     service.start()
     try:
