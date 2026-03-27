@@ -22,6 +22,24 @@ Show the available CLI flags with:
 uvx data-filter-mcp --help
 ```
 
+### Restricting file access with `--workdir`
+
+By default the server can read any file on the local filesystem. Use one or
+more `--workdir` flags to restrict file reads to specific directories:
+
+```bash
+uvx data-filter-mcp \
+  --filter-ttl-seconds 3600 \
+  --cleanup-interval-seconds 60 \
+  --workdir /Users/me/project \
+  --workdir /tmp/data
+```
+
+Rules:
+- Each `--workdir` value must be an **absolute path** to an existing directory.
+- `run_filter` will only accept files located inside the allowed directories.
+- If no `--workdir` flags are provided, no restrictions are applied (backward compatible).
+
 Example MCP client configuration:
 
 ```json
@@ -34,7 +52,11 @@ Example MCP client configuration:
         "--filter-ttl-seconds",
         "3600",
         "--cleanup-interval-seconds",
-        "60"
+        "60",
+        "--workdir",
+        "/Users/me/project",
+        "--workdir",
+        "/tmp/data"
       ]
     }
   }
