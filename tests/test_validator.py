@@ -166,3 +166,153 @@ def test_compile_filter_requires_exact_signature() -> None:
 
     with pytest.raises(FilterValidationError, match="exactly one parameter named data"):
         compile_filter(code)
+
+
+def test_compile_filter_allows_lambda_as_sort_key() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            ranked = sorted(data, key=lambda item: item.get("score"))
+            return ",".join([item.get("name") for item in ranked])
+        """
+    )
+
+    filter_fn = compile_filter(code)
+
+    result = filter_fn(
+        [
+            {"name": "b", "score": 2},
+            {"name": "a", "score": 1},
+            {"name": "c", "score": 3},
+        ]
+    )
+    assert result == "a,b,c"
+
+
+def test_compile_filter_allows_lambda_in_max() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            top = max(data, key=lambda item: item["age"])
+            return top["name"]
+        """
+    )
+
+    filter_fn = compile_filter(code)
+
+    assert (
+        filter_fn(
+            [
+                {"name": "alice", "age": 30},
+                {"name": "bob", "age": 42},
+                {"name": "carol", "age": 25},
+            ]
+        )
+        == "bob"
+    )
+
+
+def test_compile_filter_lambda_body_still_validated() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return sorted(data, key=lambda item: eval(item))
+        """
+    )
+
+    with pytest.raises(FilterValidationError, match="eval"):
+        compile_filter(code)
+
+
+def test_compile_filter_lambda_body_blocks_dunder_attribute() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return sorted(data, key=lambda item: item.__class__)
+        """
+    )
+
+    with pytest.raises(FilterValidationError, match="Attribute access"):
+        compile_filter(code)
+
+
+def test_compile_filter_allows_json_round_trip() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            parsed = json.loads(data)
+            return json.dumps(parsed)
+        """
+    )
+
+    filter_fn = compile_filter(code)
+
+    assert filter_fn('{"k": 1}') == '{"k": 1}'
+
+
+def test_compile_filter_allows_yaml_safe_round_trip() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            parsed = yaml.safe_load(data)
+            return yaml.safe_dump(parsed).strip()
+        """
+    )
+
+    filter_fn = compile_filter(code)
+
+    assert filter_fn("k: 1") == "k: 1"
+
+
+def test_compile_filter_rejects_yaml_unsafe_load() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return str(yaml.load(data))
+        """
+    )
+
+    with pytest.raises(FilterValidationError, match="Method is not allowed: load"):
+        compile_filter(code)
+
+
+def test_compile_filter_allows_re_search_and_group() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return re.search(r"(\\d+)", data).group(1)
+        """
+    )
+
+    filter_fn = compile_filter(code)
+
+    assert filter_fn("order #4242 received") == "4242"
+
+
+def test_compile_filter_allows_re_findall_and_sub() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            numbers = re.findall(r"\\d+", data)
+            cleaned = re.sub(r"\\d+", "#", data)
+            return ",".join(numbers) + "|" + cleaned
+        """
+    )
+
+    filter_fn = compile_filter(code)
+
+    assert filter_fn("a1 b22 c") == "1,22|a# b# c"
+
+
+def test_compile_filter_allows_re_compile_chain() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            pattern = re.compile(r"\\d+")
+            return ",".join(pattern.findall(data))
+        """
+    )
+
+    filter_fn = compile_filter(code)
+
+    assert filter_fn("a1 b22 c333") == "1,22,333"
