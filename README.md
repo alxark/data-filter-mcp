@@ -8,6 +8,17 @@ Local MCP server that registers restricted Python filters and runs them against 
 - `run_filter` loads a local file, passes the loaded document into `filter_item(data)`, and returns the text from `result_text`
 - Registered filters live only in memory and expire automatically based on server TTL settings
 
+### What filter code may use
+
+Filter bodies are AST-validated against a whitelist. In addition to a curated set of builtins (`len`, `sorted`, `max`, `min`, `range`, `enumerate`, `zip`, `sum`, `any`, `all`, conversions, etc.) and safe string/dict/list methods, filters may also use:
+
+- **`lambda` expressions** — typically as `key=` arguments, e.g. `sorted(data, key=lambda item: item.get("score"))`. Lambda bodies are validated by the same rules as the rest of the filter.
+- **`json`** — `json.loads`, `json.dumps`.
+- **`yaml`** — `yaml.safe_load`, `yaml.safe_dump`. The unsafe `yaml.load` / `yaml.dump` are intentionally not exposed.
+- **`re`** — `re.match`, `re.search`, `re.fullmatch`, `re.findall`, `re.sub`, `re.subn`, `re.compile`, `re.escape`, plus `Match` / `Pattern` methods (`group`, `groups`, `groupdict`, `start`, `end`, `span`).
+
+Note: `re.compile` runs against patterns supplied by filter code, so a pathological pattern can stall the server (ReDoS). Treat filter source as trusted-but-restricted.
+
 ## Run with uvx
 
 After publishing to PyPI, start the server with:

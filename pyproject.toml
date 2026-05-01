@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=68", "wheel", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "data-filter-mcp"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Local MCP server for running restricted Python text filters over files"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -43,3 +43,7 @@ testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 include = ["data_filter_mcp*"]
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0+local"
+version_file = "data_filter_mcp/_version.py"

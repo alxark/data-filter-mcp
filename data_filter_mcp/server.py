@@ -154,8 +154,14 @@ def create_mcp_server(service: FilterService | None = None) -> FastMCP:
 
         Safety rules:
         - The code is validated against a restricted Python subset
-        - Imports, file I/O, network access, dynamic execution, and unsafe attribute access are rejected
+        - Imports, network access, dynamic execution, and unsafe attribute access are rejected
         - Registered filters are stored in memory only and expire automatically after a server-side TTL
+
+        Forbidden:
+        - Using non-standard libraries or modules
+        - Accessing the filesystem, network, or environment variables
+        - Defining multiple functions, classes, or global code
+        - Using dynamic features like eval, exec, or __import__
 
         Args:
             code: Python source code that defines exactly one function named filter_item(data).

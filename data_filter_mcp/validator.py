@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import ast
+import json
+import re
 from types import CodeType
 from typing import Any
 
-POLICY_VERSION = "1.1"
+import yaml
+
+POLICY_VERSION = "1.2"
+
+SAFE_MODULES: dict[str, Any] = {
+    "json": json,
+    "yaml": yaml,
+    "re": re,
+}
 
 SAFE_BUILTINS: dict[str, Any] = {
     "all": all,
@@ -32,13 +42,22 @@ SAFE_METHODS = {
     "capitalize",
     "casefold",
     "center",
+    "compile",
     "count",
+    "dumps",
     "encode",
+    "end",
     "endswith",
+    "escape",
     "expandtabs",
     "extend",
     "find",
+    "findall",
+    "fullmatch",
     "get",
+    "group",
+    "groupdict",
+    "groups",
     "index",
     "isalnum",
     "isalpha",
@@ -56,9 +75,11 @@ SAFE_METHODS = {
     "join",
     "keys",
     "ljust",
+    "loads",
     "lower",
     "lstrip",
     "maketrans",
+    "match",
     "partition",
     "removeprefix",
     "removesuffix",
@@ -69,10 +90,17 @@ SAFE_METHODS = {
     "rpartition",
     "rsplit",
     "rstrip",
+    "safe_dump",
+    "safe_load",
+    "search",
+    "span",
     "split",
     "splitlines",
+    "start",
     "startswith",
     "strip",
+    "sub",
+    "subn",
     "swapcase",
     "title",
     "translate",
@@ -120,6 +148,7 @@ ALLOWED_NODE_TYPES = {
     ast.BinOp,
     ast.UnaryOp,
     ast.IfExp,
+    ast.Lambda,
     ast.ListComp,
     ast.SetComp,
     ast.DictComp,
@@ -277,7 +306,10 @@ def compile_filter(source_code: str):
     FilterValidator().validate(tree)
     compiled = _compile_tree(tree)
 
-    execution_globals: dict[str, Any] = {"__builtins__": SAFE_BUILTINS.copy()}
+    execution_globals: dict[str, Any] = {
+        "__builtins__": SAFE_BUILTINS.copy(),
+        **SAFE_MODULES,
+    }
     exec(compiled, execution_globals, execution_globals)
 
     filter_fn = execution_globals.get("filter_item")

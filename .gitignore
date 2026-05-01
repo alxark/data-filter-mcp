@@ -5,3 +5,4 @@ dist/
 __pycache__/
 .pytest_cache/
 .idea
+data_filter_mcp/_version.py
