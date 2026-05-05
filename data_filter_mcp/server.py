@@ -160,7 +160,7 @@ def create_mcp_server(service: FilterService | None = None) -> FastMCP:
         Forbidden:
         - Using non-standard libraries or modules
         - Accessing the filesystem, network, or environment variables
-        - Defining multiple functions, classes, or global code
+        - Defining multiple top-level functions, classes, or module-level code
         - Using dynamic features like eval, exec, or __import__
 
         Args:

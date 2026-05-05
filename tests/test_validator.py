@@ -304,6 +304,78 @@ def test_compile_filter_allows_re_findall_and_sub() -> None:
     assert filter_fn("a1 b22 c") == "1,22|a# b# c"
 
 
+def test_compile_filter_allows_nested_helper_function() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            def label(item):
+                return str(item).upper()
+            return ",".join([label(x) for x in data])
+        """
+    )
+
+    filter_fn = compile_filter(code)
+
+    assert filter_fn(["a", "b", "c"]) == "A,B,C"
+
+
+def test_compile_filter_allows_nested_helper_with_defaults_and_kwonly() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            def render(item, prefix="-", *, suffix="!"):
+                return prefix + str(item) + suffix
+            return ",".join([render(x) for x in data])
+        """
+    )
+
+    filter_fn = compile_filter(code)
+
+    assert filter_fn(["a", "b"]) == "-a!,-b!"
+
+
+def test_compile_filter_nested_helper_body_still_validated() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            def bad(item):
+                return eval(item)
+            return bad(data)
+        """
+    )
+
+    with pytest.raises(FilterValidationError, match="eval"):
+        compile_filter(code)
+
+
+def test_compile_filter_nested_helper_blocks_dunder_attribute() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            def peek(item):
+                return item.__class__
+            return str(peek(data))
+        """
+    )
+
+    with pytest.raises(FilterValidationError, match="Attribute access"):
+        compile_filter(code)
+
+
+def test_compile_filter_rejects_nested_helper_with_dunder_name() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            def __sneaky__(item):
+                return str(item)
+            return __sneaky__(data)
+        """
+    )
+
+    with pytest.raises(FilterValidationError, match="Nested function name"):
+        compile_filter(code)
+
+
 def test_compile_filter_allows_re_compile_chain() -> None:
     code = textwrap.dedent(
         """

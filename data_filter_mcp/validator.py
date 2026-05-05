@@ -62,6 +62,8 @@ SAFE_METHODS = {
     "isalnum",
     "isalpha",
     "isascii",
+    "pop",
+    "push",
     "isdecimal",
     "isdigit",
     "isidentifier",
@@ -190,9 +192,15 @@ class FilterValidationError(ValueError):
 class FilterValidator(ast.NodeVisitor):
     def __init__(self) -> None:
         self._parents: dict[int, ast.AST] = {}
+        self._defined_function_names: set[str] = set()
 
     def validate(self, tree: ast.AST) -> None:
         self._parents = self._build_parent_map(tree)
+        self._defined_function_names = {
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+        }
         self.visit(tree)
 
     def generic_visit(self, node: ast.AST) -> None:
@@ -210,26 +218,35 @@ class FilterValidator(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        if node.name != "filter_item":
-            raise FilterValidationError("Filter function must be named filter_item")
         if node.decorator_list:
             raise FilterValidationError("Decorators are not allowed")
         if node.returns is not None:
             raise FilterValidationError("Return annotations are not allowed")
 
-        args = node.args
-        if (
-            len(args.args) != 1
-            or args.args[0].arg != "data"
-            or args.vararg is not None
-            or args.kwarg is not None
-            or args.kwonlyargs
-            or args.defaults
-            or args.kw_defaults
-        ):
-            raise FilterValidationError(
-                "filter_item must have exactly one parameter named data"
-            )
+        if isinstance(self._parents.get(id(node)), ast.Module):
+            if node.name != "filter_item":
+                raise FilterValidationError(
+                    "Filter function must be named filter_item"
+                )
+
+            args = node.args
+            if (
+                len(args.args) != 1
+                or args.args[0].arg != "data"
+                or args.vararg is not None
+                or args.kwarg is not None
+                or args.kwonlyargs
+                or args.defaults
+                or args.kw_defaults
+            ):
+                raise FilterValidationError(
+                    "filter_item must have exactly one parameter named data"
+                )
+        else:
+            if node.name.startswith("__"):
+                raise FilterValidationError(
+                    f"Nested function name is not allowed: {node.name}"
+                )
 
         self.generic_visit(node)
 
@@ -254,7 +271,10 @@ class FilterValidator(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         if isinstance(node.func, ast.Name):
-            if node.func.id not in SAFE_BUILTINS:
+            if (
+                node.func.id not in SAFE_BUILTINS
+                and node.func.id not in self._defined_function_names
+            ):
                 raise FilterValidationError(
                     f"Calling this function is not allowed: {node.func.id}"
                 )
