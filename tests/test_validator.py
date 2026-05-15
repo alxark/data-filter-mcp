@@ -388,3 +388,197 @@ def test_compile_filter_allows_re_compile_chain() -> None:
     filter_fn = compile_filter(code)
 
     assert filter_fn("a1 b22 c333") == "1,22,333"
+
+
+@pytest.mark.parametrize(
+    ("code", "data", "expected"),
+    [
+        (
+            """
+            def filter_item(data):
+                return str(math.ceil(data))
+            """,
+            1.2,
+            "2",
+        ),
+        (
+            """
+            def filter_item(data):
+                return str(statistics.mean(data))
+            """,
+            [1, 2, 3, 4],
+            "2.5",
+        ),
+        (
+            """
+            def filter_item(data):
+                return datetime.datetime.fromisoformat(data).isoformat()
+            """,
+            "2024-01-02T03:04:05",
+            "2024-01-02T03:04:05",
+        ),
+        (
+            """
+            def filter_item(data):
+                return str(datetime.datetime.now(datetime.timezone.utc).isoformat().endswith("+00:00"))
+            """,
+            None,
+            "True",
+        ),
+        (
+            """
+            def filter_item(data):
+                return str(decimal.Decimal(data).quantize(decimal.Decimal("0.01")))
+            """,
+            "1.2345",
+            "1.23",
+        ),
+        (
+            """
+            def filter_item(data):
+                c = collections.Counter(data)
+                return ",".join([f"{k}:{v}" for k, v in c.most_common()])
+            """,
+            "abca",
+            "a:2,b:1,c:1",
+        ),
+        (
+            """
+            def filter_item(data):
+                return ",".join([str(x) for x in itertools.islice(data, 3)])
+            """,
+            [10, 20, 30, 40, 50],
+            "10,20,30",
+        ),
+        (
+            """
+            def filter_item(data):
+                return ",".join([str(x) for x in itertools.chain.from_iterable(data)])
+            """,
+            [[1, 2], [3]],
+            "1,2,3",
+        ),
+        (
+            """
+            def filter_item(data):
+                return str(functools.reduce(lambda a, b: a + b, data))
+            """,
+            [1, 2, 3, 4],
+            "10",
+        ),
+        (
+            """
+            def filter_item(data):
+                ranked = sorted(data, key=operator.itemgetter("v"))
+                return ",".join([item["name"] for item in ranked])
+            """,
+            [{"name": "b", "v": 2}, {"name": "a", "v": 1}],
+            "a,b",
+        ),
+        (
+            """
+            def filter_item(data):
+                return textwrap.shorten(data, width=10, placeholder="...")
+            """,
+            "hello world here",
+            "hello...",
+        ),
+        (
+            """
+            def filter_item(data):
+                return html.escape(data)
+            """,
+            "<b>",
+            "&lt;b&gt;",
+        ),
+        (
+            """
+            def filter_item(data):
+                return str(base64.b64encode(data.encode("utf-8")))
+            """,
+            "ok",
+            "b'b2s='",
+        ),
+        (
+            """
+            def filter_item(data):
+                return hashlib.sha256(data.encode("utf-8")).hexdigest()[:8]
+            """,
+            "abc",
+            "ba7816bf",
+        ),
+        (
+            """
+            def filter_item(data):
+                net = ipaddress.ip_network(data)
+                return str(net.supernet())
+            """,
+            "10.0.0.0/24",
+            "10.0.0.0/23",
+        ),
+        (
+            """
+            def filter_item(data):
+                return unicodedata.category(data)
+            """,
+            "A",
+            "Lu",
+        ),
+        (
+            """
+            def filter_item(data):
+                return ",".join(difflib.get_close_matches(data, ["apple", "ape", "april"], n=2))
+            """,
+            "appl",
+            "apple,april",
+        ),
+    ],
+)
+def test_compile_filter_allows_default_stdlib_modules(
+    code: str, data, expected
+) -> None:
+    filter_fn = compile_filter(textwrap.dedent(code))
+
+    assert filter_fn(data) == expected
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    ["os", "sys", "subprocess", "socket", "pickle", "urllib", "shutil", "pathlib"],
+)
+def test_compile_filter_rejects_disallowed_modules(module_name: str) -> None:
+    code = textwrap.dedent(
+        f"""
+        def filter_item(data):
+            return {module_name}.loads(data)
+        """
+    )
+
+    filter_fn = compile_filter(code)
+    with pytest.raises(NameError):
+        filter_fn("{}")
+
+
+def test_compile_filter_rejects_operator_attrgetter() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            getter = operator.attrgetter("__class__")
+            return str(getter(data))
+        """
+    )
+
+    with pytest.raises(FilterValidationError, match="Method is not allowed: attrgetter"):
+        compile_filter(code)
+
+
+def test_compile_filter_rejects_functools_lru_cache() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return str(functools.lru_cache(maxsize=1))
+        """
+    )
+
+    with pytest.raises(FilterValidationError, match="Method is not allowed: lru_cache"):
+        compile_filter(code)
