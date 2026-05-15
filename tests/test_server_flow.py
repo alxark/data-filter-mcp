@@ -198,3 +198,340 @@ def test_filter_service_rejects_expired_filters(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="expired"):
         service.run_filter(register_result.filter_id, str(file_path))
+
+
+def test_filter_service_converts_json_file_to_destination(tmp_path) -> None:
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    source = workdir / "items.json"
+    destination = workdir / "out" / "items.txt"
+    source.write_text(json.dumps({"items": ["red", "blue"]}), encoding="utf-8")
+
+    service = FilterService(
+        filter_ttl_seconds=300,
+        cleanup_interval_seconds=300.0,
+        workdirs=[str(workdir)],
+    )
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return "\\n".join(data["items"])
+        """
+    )
+
+    reg = service.register_filter(code)
+    result = service.convert_file(reg.filter_id, str(source), str(destination))
+
+    assert destination.read_text(encoding="utf-8") == "red\nblue"
+    assert result.filter_id == reg.filter_id
+    assert result.source_file_path == str(source.resolve())
+    assert result.destination_file_path == str(destination.resolve())
+    assert result.file_type == "json"
+    assert result.bytes_written == len("red\nblue".encode("utf-8"))
+    assert result.overwritten is False
+
+
+def test_filter_service_converts_txt_file_with_explicit_type(tmp_path) -> None:
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    source = workdir / "input.data"
+    destination = workdir / "output.txt"
+    source.write_text("one\ntwo\n", encoding="utf-8")
+
+    service = FilterService(
+        filter_ttl_seconds=300,
+        cleanup_interval_seconds=300.0,
+        workdirs=[str(workdir)],
+    )
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return ",".join(data)
+        """
+    )
+
+    reg = service.register_filter(code)
+    result = service.convert_file(
+        reg.filter_id,
+        str(source),
+        str(destination),
+        file_type="txt",
+    )
+
+    assert destination.read_text(encoding="utf-8") == "one,two"
+    assert result.file_type == "txt"
+
+
+def test_filter_service_convert_file_requires_workdir(tmp_path) -> None:
+    source = tmp_path / "data.json"
+    destination = tmp_path / "out.txt"
+    source.write_text(json.dumps({"x": 1}), encoding="utf-8")
+    service = FilterService(filter_ttl_seconds=300, cleanup_interval_seconds=300.0)
+    reg = service.register_filter(
+        textwrap.dedent(
+            """
+            def filter_item(data):
+                return "ok"
+            """
+        )
+    )
+
+    with pytest.raises(ValueError, match="requires at least one --workdir"):
+        service.convert_file(reg.filter_id, str(source), str(destination))
+
+
+def test_filter_service_convert_file_rejects_source_outside_workdir(tmp_path) -> None:
+    workdir = tmp_path / "work"
+    outside = tmp_path / "outside"
+    workdir.mkdir()
+    outside.mkdir()
+    source = outside / "data.json"
+    destination = workdir / "out.txt"
+    source.write_text(json.dumps({"x": 1}), encoding="utf-8")
+
+    service = FilterService(
+        filter_ttl_seconds=300,
+        cleanup_interval_seconds=300.0,
+        workdirs=[str(workdir)],
+    )
+    reg = service.register_filter(
+        textwrap.dedent(
+            """
+            def filter_item(data):
+                return "ok"
+            """
+        )
+    )
+
+    with pytest.raises(ValueError, match="outside allowed workdirs"):
+        service.convert_file(reg.filter_id, str(source), str(destination))
+
+
+def test_filter_service_convert_file_rejects_destination_outside_workdir(
+    tmp_path,
+) -> None:
+    workdir = tmp_path / "work"
+    outside = tmp_path / "outside"
+    workdir.mkdir()
+    outside.mkdir()
+    source = workdir / "data.json"
+    destination = outside / "out.txt"
+    source.write_text(json.dumps({"x": 1}), encoding="utf-8")
+
+    service = FilterService(
+        filter_ttl_seconds=300,
+        cleanup_interval_seconds=300.0,
+        workdirs=[str(workdir)],
+    )
+    reg = service.register_filter(
+        textwrap.dedent(
+            """
+            def filter_item(data):
+                return "ok"
+            """
+        )
+    )
+
+    with pytest.raises(ValueError, match="Destination path is outside"):
+        service.convert_file(reg.filter_id, str(source), str(destination))
+
+
+def test_filter_service_convert_file_rejects_relative_paths(tmp_path) -> None:
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    source = workdir / "data.json"
+    destination = workdir / "out.txt"
+    source.write_text(json.dumps({"x": 1}), encoding="utf-8")
+
+    service = FilterService(
+        filter_ttl_seconds=300,
+        cleanup_interval_seconds=300.0,
+        workdirs=[str(workdir)],
+    )
+    reg = service.register_filter(
+        textwrap.dedent(
+            """
+            def filter_item(data):
+                return "ok"
+            """
+        )
+    )
+
+    with pytest.raises(ValueError, match="file_path must be an absolute path"):
+        service.convert_file(reg.filter_id, "relative.json", str(destination))
+
+    with pytest.raises(ValueError, match="destination_file_path must be an absolute path"):
+        service.convert_file(reg.filter_id, str(source), "relative.txt")
+
+
+def test_filter_service_convert_file_requires_overwrite_for_existing_file(
+    tmp_path,
+) -> None:
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    source = workdir / "data.json"
+    destination = workdir / "out.txt"
+    source.write_text(json.dumps({"x": 1}), encoding="utf-8")
+    destination.write_text("old", encoding="utf-8")
+
+    service = FilterService(
+        filter_ttl_seconds=300,
+        cleanup_interval_seconds=300.0,
+        workdirs=[str(workdir)],
+    )
+    reg = service.register_filter(
+        textwrap.dedent(
+            """
+            def filter_item(data):
+                return "new"
+            """
+        )
+    )
+
+    with pytest.raises(ValueError, match="already exists"):
+        service.convert_file(reg.filter_id, str(source), str(destination))
+
+    result = service.convert_file(
+        reg.filter_id,
+        str(source),
+        str(destination),
+        overwrite=True,
+    )
+    assert destination.read_text(encoding="utf-8") == "new"
+    assert result.overwritten is True
+
+
+def test_filter_service_convert_file_rejects_destination_directory(tmp_path) -> None:
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    source = workdir / "data.json"
+    destination = workdir / "existing-dir"
+    destination.mkdir()
+    source.write_text(json.dumps({"x": 1}), encoding="utf-8")
+
+    service = FilterService(
+        filter_ttl_seconds=300,
+        cleanup_interval_seconds=300.0,
+        workdirs=[str(workdir)],
+    )
+    reg = service.register_filter(
+        textwrap.dedent(
+            """
+            def filter_item(data):
+                return "ok"
+            """
+        )
+    )
+
+    with pytest.raises(ValueError, match="Destination path is a directory"):
+        service.convert_file(reg.filter_id, str(source), str(destination))
+
+
+def test_filter_service_convert_file_rejects_same_source_and_destination(
+    tmp_path,
+) -> None:
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    source = workdir / "data.json"
+    source.write_text(json.dumps({"x": 1}), encoding="utf-8")
+
+    service = FilterService(
+        filter_ttl_seconds=300,
+        cleanup_interval_seconds=300.0,
+        workdirs=[str(workdir)],
+    )
+    reg = service.register_filter(
+        textwrap.dedent(
+            """
+            def filter_item(data):
+                return "ok"
+            """
+        )
+    )
+
+    with pytest.raises(ValueError, match="must differ"):
+        service.convert_file(reg.filter_id, str(source), str(source), overwrite=True)
+
+
+def test_filter_service_convert_file_rejects_non_string_result(tmp_path) -> None:
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    source = workdir / "data.json"
+    destination = workdir / "out.txt"
+    source.write_text(json.dumps({"x": 1}), encoding="utf-8")
+
+    service = FilterService(
+        filter_ttl_seconds=300,
+        cleanup_interval_seconds=300.0,
+        workdirs=[str(workdir)],
+    )
+    reg = service.register_filter(
+        textwrap.dedent(
+            """
+            def filter_item(data):
+                return data
+            """
+        )
+    )
+
+    with pytest.raises(ValueError, match="must return a string"):
+        service.convert_file(reg.filter_id, str(source), str(destination))
+    assert not destination.exists()
+
+
+def test_filter_service_convert_file_rejects_expired_filters(tmp_path) -> None:
+    current_time = {"value": datetime(2026, 1, 1, tzinfo=timezone.utc)}
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    source = workdir / "items.txt"
+    destination = workdir / "out.txt"
+    source.write_text("one\ntwo\n", encoding="utf-8")
+    service = FilterService(
+        filter_ttl_seconds=5,
+        cleanup_interval_seconds=30.0,
+        now_provider=lambda: current_time["value"],
+        workdirs=[str(workdir)],
+    )
+    reg = service.register_filter(
+        textwrap.dedent(
+            """
+            def filter_item(data):
+                return "ok"
+            """
+        )
+    )
+    current_time["value"] = current_time["value"] + timedelta(seconds=6)
+
+    with pytest.raises(ValueError, match="expired"):
+        service.convert_file(reg.filter_id, str(source), str(destination))
+
+
+def test_filter_service_convert_file_rechecks_destination_parent_after_mkdir(
+    tmp_path,
+) -> None:
+    workdir = tmp_path / "work"
+    outside = tmp_path / "outside"
+    workdir.mkdir()
+    outside.mkdir()
+    source = workdir / "data.json"
+    source.write_text(json.dumps({"x": 1}), encoding="utf-8")
+    link = workdir / "link"
+    link.symlink_to(outside, target_is_directory=True)
+    destination = link / "out.txt"
+
+    service = FilterService(
+        filter_ttl_seconds=300,
+        cleanup_interval_seconds=300.0,
+        workdirs=[str(workdir)],
+    )
+    reg = service.register_filter(
+        textwrap.dedent(
+            """
+            def filter_item(data):
+                return "ok"
+            """
+        )
+    )
+
+    with pytest.raises(ValueError, match="Destination path is outside"):
+        service.convert_file(reg.filter_id, str(source), str(destination))

@@ -41,6 +41,30 @@ class RunFilterResult(BaseModel):
     result_text: str = Field(description="Exact text returned by filter_item(data).")
 
 
+class ConvertFileResult(BaseModel):
+    filter_id: str = Field(
+        description="Identifier of the registered filter that produced this file."
+    )
+    source_file_path: str = Field(
+        description="Resolved absolute path of the processed source file."
+    )
+    destination_file_path: str = Field(
+        description="Resolved absolute path where the result text was written."
+    )
+    file_type: str = Field(
+        description="Effective loader type used for the source file. One of: json, yaml, txt."
+    )
+    expires_at: str = Field(
+        description="UTC timestamp in ISO 8601 format when this filter expires."
+    )
+    bytes_written: int = Field(
+        description="Number of UTF-8 bytes written to the destination file."
+    )
+    overwritten: bool = Field(
+        description="Whether an existing destination file was replaced."
+    )
+
+
 @dataclass(slots=True)
 class RegisteredFilter:
     filter_id: str

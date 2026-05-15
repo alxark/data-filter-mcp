@@ -9,7 +9,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from .loaders.factory import load_document
-from .models import RegisterFilterResult, RunFilterResult
+from .models import ConvertFileResult, RegisterFilterResult, RunFilterResult
 from .registry import FilterExpiredError, FilterNotFoundError, FilterRegistry
 from .validator import POLICY_VERSION, FilterValidationError, compile_filter
 
@@ -88,6 +88,47 @@ class FilterService:
 
         return resolved
 
+    def _resolve_destination_file_path(self, file_path: str) -> Path:
+        candidate = Path(file_path)
+        if not candidate.is_absolute():
+            raise ValueError(
+                f"destination_file_path must be an absolute path: {file_path}"
+            )
+
+        if not self._workdirs:
+            raise ValueError(
+                "convert_file requires at least one --workdir to be configured"
+            )
+
+        try:
+            resolved = candidate.expanduser().resolve(strict=False)
+        except OSError as exc:
+            raise ValueError(f"Cannot resolve destination path: {file_path}") from exc
+
+        if not any(resolved == wd or wd in resolved.parents for wd in self._workdirs):
+            raise ValueError(f"Destination path is outside allowed workdirs: {resolved}")
+
+        if resolved.exists() and resolved.is_dir():
+            raise ValueError(f"Destination path is a directory: {resolved}")
+
+        return resolved
+
+    def _ensure_destination_parent_allowed(self, destination: Path) -> None:
+        try:
+            resolved_parent = destination.parent.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError(
+                f"Cannot resolve destination parent directory: {destination.parent}"
+            ) from exc
+
+        if not any(
+            resolved_parent == wd or wd in resolved_parent.parents
+            for wd in self._workdirs
+        ):
+            raise ValueError(
+                f"Destination parent is outside allowed workdirs: {resolved_parent}"
+            )
+
     def run_filter(
         self,
         filter_id: str,
@@ -112,6 +153,52 @@ class FilterService:
             file_type=resolved_file_type,
             filter_id=entry.filter_id,
             result_text=result,
+        )
+
+    def convert_file(
+        self,
+        filter_id: str,
+        source_file_path: str,
+        destination_file_path: str,
+        file_type: Literal["json", "yaml", "txt"] | None = None,
+        overwrite: bool = False,
+    ) -> ConvertFileResult:
+        try:
+            entry = self._registry.get(filter_id)
+        except (FilterNotFoundError, FilterExpiredError) as exc:
+            raise ValueError(str(exc)) from exc
+
+        resolved_source = self._resolve_allowed_file_path(source_file_path)
+        resolved_destination = self._resolve_destination_file_path(destination_file_path)
+
+        if resolved_source == resolved_destination:
+            raise ValueError("source and destination paths must differ")
+
+        will_overwrite = resolved_destination.exists()
+        if will_overwrite and not overwrite:
+            raise ValueError(
+                "Destination file already exists (set overwrite=true to replace): "
+                f"{resolved_destination}"
+            )
+
+        document, resolved_file_type = load_document(resolved_source, file_type)
+        result = entry.function(document)
+        if not isinstance(result, str):
+            raise ValueError("filter_item(data) must return a string")
+
+        encoded = result.encode("utf-8")
+        resolved_destination.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_destination_parent_allowed(resolved_destination)
+        resolved_destination.write_bytes(encoded)
+
+        return ConvertFileResult(
+            expires_at=_to_isoformat(entry.expires_at),
+            filter_id=entry.filter_id,
+            source_file_path=str(resolved_source),
+            destination_file_path=str(resolved_destination),
+            file_type=resolved_file_type,
+            bytes_written=len(encoded),
+            overwritten=will_overwrite,
         )
 
 
@@ -151,6 +238,12 @@ def create_mcp_server(service: FilterService | None = None) -> FastMCP:
 
         The function must return a text result (str). The returned text may contain any
         format you want, such as plain text, YAML, CSV-like text, or a custom report.
+
+        Preloaded standard-library modules:
+        - json, yaml, re
+        - math, statistics, datetime, decimal
+        - collections, itertools, functools, operator
+        - textwrap, html, base64, hashlib, ipaddress, unicodedata, difflib
 
         Safety rules:
         - The code is validated against a restricted Python subset
@@ -237,6 +330,86 @@ def create_mcp_server(service: FilterService | None = None) -> FastMCP:
         """
 
         return active_service.run_filter(filter_id, file_path, file_type)
+
+    @mcp.tool()
+    def convert_file(
+        filter_id: Annotated[
+            str,
+            Field(description="Identifier previously returned by register_filter."),
+        ],
+        source_file_path: Annotated[
+            str,
+            Field(
+                description=(
+                    "Absolute path to the source file. Must be inside an allowed "
+                    "--workdir if any are configured."
+                )
+            ),
+        ],
+        destination_file_path: Annotated[
+            str,
+            Field(
+                description=(
+                    "Absolute path to the destination file. Must be inside an "
+                    "allowed --workdir. Missing parent directories are created "
+                    "automatically."
+                )
+            ),
+        ],
+        file_type: Annotated[
+            Literal["json", "yaml", "txt"] | None,
+            Field(
+                description=(
+                    "Optional explicit file type override for the source file. "
+                    "If omitted, detected from the source extension."
+                )
+            ),
+        ] = None,
+        overwrite: Annotated[
+            bool,
+            Field(
+                description=(
+                    "If false (default), fail when destination exists. If true, "
+                    "overwrite the existing destination file."
+                )
+            ),
+        ] = False,
+    ) -> ConvertFileResult:
+        """
+        Apply a registered filter to a source file and save the text output.
+
+        Use this tool after register_filter when you want to transform a local
+        json, yaml, or txt file and persist the returned string as UTF-8 text.
+        The destination path must be inside a configured --workdir; unlike
+        run_filter, convert_file refuses to write when no --workdir is configured.
+
+        Missing destination parent directories are created automatically. Existing
+        destination files are rejected unless overwrite is true.
+
+        Args:
+            filter_id: Identifier returned earlier by register_filter.
+            source_file_path: Absolute path to the source file to load.
+            destination_file_path: Absolute path where result text is saved.
+            file_type: Optional explicit source file type override.
+            overwrite: Whether to replace an existing destination file.
+
+        Returns:
+            A structured object describing the written file and filter metadata.
+
+        Raises:
+            ValueError: If paths are invalid, workdir is missing, the filter is
+                unknown or expired, destination exists without overwrite, or the
+                filter returns a non-string result.
+            FileNotFoundError: If the source file does not exist.
+        """
+
+        return active_service.convert_file(
+            filter_id,
+            source_file_path,
+            destination_file_path,
+            file_type,
+            overwrite,
+        )
 
     return mcp
 

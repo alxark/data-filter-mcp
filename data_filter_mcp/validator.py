@@ -1,19 +1,59 @@
 from __future__ import annotations
 
 import ast
+import base64
+import collections
+import datetime
+import decimal
+import difflib
+import functools
+import hashlib
+import html
+import ipaddress
+import itertools
 import json
+import math
+import operator
 import re
+import statistics
+import textwrap
+import unicodedata
 from types import CodeType
 from typing import Any
 
 import yaml
 
-POLICY_VERSION = "1.2"
+POLICY_VERSION = "1.3"
 
 SAFE_MODULES: dict[str, Any] = {
+    "base64": base64,
+    "collections": collections,
+    "datetime": datetime,
+    "decimal": decimal,
+    "difflib": difflib,
+    "functools": functools,
+    "hashlib": hashlib,
+    "html": html,
+    "ipaddress": ipaddress,
+    "itertools": itertools,
     "json": json,
-    "yaml": yaml,
+    "math": math,
+    "operator": operator,
     "re": re,
+    "statistics": statistics,
+    "textwrap": textwrap,
+    "unicodedata": unicodedata,
+    "yaml": yaml,
+}
+
+SAFE_ATTRIBUTE_READS = {
+    ("datetime", "date"),
+    ("datetime", "datetime"),
+    ("datetime", "time"),
+    ("datetime", "timedelta"),
+    ("datetime", "timezone"),
+    ("datetime", "timezone", "utc"),
+    ("itertools", "chain"),
 }
 
 SAFE_BUILTINS: dict[str, Any] = {
@@ -38,54 +78,192 @@ SAFE_BUILTINS: dict[str, Any] = {
 }
 
 SAFE_METHODS = {
+    "IPv4Address",
+    "IPv4Network",
+    "IPv6Address",
+    "IPv6Network",
+    "Decimal",
+    "OrderedDict",
+    "SequenceMatcher",
     "append",
+    "appendleft",
+    "abs",
+    "accumulate",
+    "add",
+    "astimezone",
+    "b16decode",
+    "b16encode",
+    "b32decode",
+    "b32encode",
+    "b64decode",
+    "b64encode",
+    "bidirectional",
+    "blake2b",
+    "blake2s",
     "capitalize",
     "casefold",
+    "category",
     "center",
+    "ceil",
+    "chain",
+    "ChainMap",
+    "cmp_to_key",
+    "comb",
+    "combinations",
+    "combinations_with_replacement",
+    "combine",
+    "combining",
     "compile",
+    "compress",
+    "context_diff",
+    "copysign",
+    "copy",
+    "copy_sign",
     "count",
+    "Counter",
+    "cycle",
+    "date",
+    "Decimal",
+    "decimal",
+    "dedent",
+    "degrees",
+    "deque",
+    "digit",
+    "digest",
     "dumps",
+    "dropwhile",
     "encode",
     "end",
     "endswith",
+    "elements",
+    "eq",
     "escape",
+    "exp",
     "expandtabs",
     "extend",
+    "extendleft",
+    "fabs",
+    "factorial",
+    "fill",
+    "filterfalse",
     "find",
     "findall",
+    "floor",
+    "floordiv",
+    "fmean",
+    "fmod",
+    "from_iterable",
+    "fromisoformat",
+    "fromkeys",
+    "fromordinal",
+    "fromtimestamp",
     "fullmatch",
+    "gcd",
+    "ge",
+    "geometric_mean",
     "get",
+    "get_close_matches",
+    "get_matching_blocks",
+    "get_opcodes",
     "group",
     "groupdict",
     "groups",
+    "groupby",
+    "gt",
+    "harmonic_mean",
+    "hexdigest",
+    "hosts",
+    "hypot",
     "index",
+    "indent",
+    "ip_address",
+    "ip_interface",
+    "ip_network",
     "isalnum",
     "isalpha",
     "isascii",
-    "pop",
-    "push",
+    "is_finite",
+    "is_infinite",
+    "is_nan",
+    "isclose",
     "isdecimal",
     "isdigit",
     "isidentifier",
+    "isfinite",
+    "isinf",
+    "isoformat",
     "islower",
+    "islice",
+    "isnan",
     "isnumeric",
     "isprintable",
     "isspace",
     "istitle",
     "isupper",
+    "isoweekday",
     "items",
+    "itemgetter",
     "join",
     "keys",
+    "lcm",
+    "le",
     "ljust",
+    "log",
+    "log10",
+    "log2",
     "loads",
     "lower",
     "lstrip",
+    "lt",
     "maketrans",
     "match",
+    "md5",
+    "mean",
+    "median",
+    "median_high",
+    "median_low",
+    "mirrored",
+    "mod",
+    "mode",
+    "modf",
+    "most_common",
+    "move_to_end",
+    "mul",
+    "multimode",
+    "name",
+    "namedtuple",
+    "ndiff",
+    "ne",
+    "neg",
+    "new",
+    "normalize",
+    "now",
+    "numeric",
+    "overlaps",
     "partition",
+    "partial",
+    "perm",
+    "permutations",
+    "pop",
+    "popleft",
+    "pos",
+    "pow",
+    "product",
+    "pstdev",
+    "push",
+    "pvariance",
+    "quantiles",
+    "quantize",
+    "quick_ratio",
+    "radians",
+    "ratio",
+    "real_quick_ratio",
+    "reduce",
     "removeprefix",
     "removesuffix",
+    "remainder",
     "replace",
+    "repeat",
     "rfind",
     "rindex",
     "rjust",
@@ -95,19 +273,55 @@ SAFE_METHODS = {
     "safe_dump",
     "safe_load",
     "search",
+    "setdefault",
+    "sha1",
+    "sha224",
+    "sha256",
+    "sha384",
+    "sha512",
+    "shorten",
     "span",
     "split",
     "splitlines",
     "start",
     "startswith",
+    "starmap",
+    "stdev",
+    "strftime",
     "strip",
     "sub",
+    "subnet_of",
+    "subnets",
     "subn",
+    "subtract",
+    "supernet",
+    "supernet_of",
     "swapcase",
+    "takewhile",
+    "tee",
     "title",
+    "timestamp",
+    "time",
+    "today",
+    "to_eng_string",
+    "to_integral_value",
+    "total_seconds",
     "translate",
+    "truediv",
+    "trunc",
+    "unescape",
+    "unified_diff",
     "upper",
+    "update",
+    "urlsafe_b64decode",
+    "urlsafe_b64encode",
+    "utcfromtimestamp",
+    "utcnow",
     "values",
+    "variance",
+    "weekday",
+    "wrap",
+    "wraps",
     "zfill",
 }
 
@@ -260,6 +474,9 @@ class FilterValidator(ast.NodeVisitor):
             raise FilterValidationError(f"Attribute access is not allowed: {node.attr}")
 
         parent = self._parents.get(id(node))
+        if self._is_safe_attribute_read(node):
+            return
+
         if not isinstance(parent, ast.Call) or parent.func is not node:
             raise FilterValidationError(
                 "Attribute access is restricted to approved method calls"
@@ -308,6 +525,25 @@ class FilterValidator(ast.NodeVisitor):
             for child in ast.iter_child_nodes(parent):
                 parents[id(child)] = parent
         return parents
+
+    @staticmethod
+    def _attribute_path(node: ast.Attribute) -> tuple[str, ...] | None:
+        parts: list[str] = []
+        current: ast.AST = node
+        while isinstance(current, ast.Attribute):
+            parts.append(current.attr)
+            current = current.value
+        if not isinstance(current, ast.Name):
+            return None
+        parts.append(current.id)
+        return tuple(reversed(parts))
+
+    def _is_safe_attribute_read(self, node: ast.Attribute) -> bool:
+        parent = self._parents.get(id(node))
+        if isinstance(parent, ast.Call) and parent.func is node:
+            return False
+        path = self._attribute_path(node)
+        return path in SAFE_ATTRIBUTE_READS
 
 
 def _parse_filter(source_code: str) -> ast.Module:

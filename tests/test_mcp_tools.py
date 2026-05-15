@@ -43,3 +43,37 @@ def test_fastmcp_tool_metadata_is_descriptive() -> None:
         run_tool.outputSchema["properties"]["result_text"]["description"]
         == "Exact text returned by filter_item(data)."
     )
+
+    convert_tool = tools["convert_file"]
+    assert "save the text output" in convert_tool.description
+    assert (
+        convert_tool.inputSchema["properties"]["filter_id"]["description"]
+        == "Identifier previously returned by register_filter."
+    )
+    assert (
+        convert_tool.inputSchema["properties"]["source_file_path"]["description"]
+        == "Absolute path to the source file. Must be inside an allowed --workdir if any are configured."
+    )
+    assert (
+        convert_tool.inputSchema["properties"]["destination_file_path"]["description"]
+        == "Absolute path to the destination file. Must be inside an allowed --workdir. Missing parent directories are created automatically."
+    )
+    assert convert_tool.inputSchema["properties"]["file_type"]["anyOf"][0]["enum"] == [
+        "json",
+        "yaml",
+        "txt",
+    ]
+    assert (
+        convert_tool.inputSchema["properties"]["overwrite"]["description"]
+        == "If false (default), fail when destination exists. If true, overwrite the existing destination file."
+    )
+    assert (
+        convert_tool.outputSchema["properties"]["destination_file_path"][
+            "description"
+        ]
+        == "Resolved absolute path where the result text was written."
+    )
+    assert (
+        convert_tool.outputSchema["properties"]["bytes_written"]["description"]
+        == "Number of UTF-8 bytes written to the destination file."
+    )
