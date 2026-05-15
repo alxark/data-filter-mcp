@@ -222,7 +222,6 @@ SAFE_METHODS = {
     "median",
     "median_high",
     "median_low",
-    "methodcaller",
     "mirrored",
     "mod",
     "mode",

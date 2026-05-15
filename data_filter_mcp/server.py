@@ -186,9 +186,10 @@ class FilterService:
         if not isinstance(result, str):
             raise ValueError("filter_item(data) must return a string")
 
+        encoded = result.encode("utf-8")
         resolved_destination.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_destination_parent_allowed(resolved_destination)
-        resolved_destination.write_text(result, encoding="utf-8")
+        resolved_destination.write_bytes(encoded)
 
         return ConvertFileResult(
             expires_at=_to_isoformat(entry.expires_at),
@@ -196,7 +197,7 @@ class FilterService:
             source_file_path=str(resolved_source),
             destination_file_path=str(resolved_destination),
             file_type=resolved_file_type,
-            bytes_written=len(result.encode("utf-8")),
+            bytes_written=len(encoded),
             overwritten=will_overwrite,
         )
 

@@ -582,3 +582,47 @@ def test_compile_filter_rejects_functools_lru_cache() -> None:
 
     with pytest.raises(FilterValidationError, match="Method is not allowed: lru_cache"):
         compile_filter(code)
+
+
+def test_compile_filter_rejects_operator_methodcaller() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            mc = operator.methodcaller("__getattribute__", "__class__")
+            return str(mc)
+        """
+    )
+
+    with pytest.raises(
+        FilterValidationError, match="Method is not allowed: methodcaller"
+    ):
+        compile_filter(code)
+
+
+def test_compile_filter_rejects_methodcaller_via_builtin_shadowing() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            str = operator.methodcaller("__getattribute__", "__class__")
+            return str(data)
+        """
+    )
+
+    with pytest.raises(
+        FilterValidationError, match="Method is not allowed: methodcaller"
+    ):
+        compile_filter(code)
+
+
+def test_compile_filter_rejects_methodcaller_in_json_object_hook() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return str(json.loads("{}", object_hook=operator.methodcaller("__getattribute__", "__class__")))
+        """
+    )
+
+    with pytest.raises(
+        FilterValidationError, match="Method is not allowed: methodcaller"
+    ):
+        compile_filter(code)
