@@ -361,6 +361,8 @@ ALLOWED_NODE_TYPES = {
     ast.Slice,
     ast.Compare,
     ast.BoolOp,
+    ast.Continue,
+    ast.Break,
     ast.BinOp,
     ast.UnaryOp,
     ast.IfExp,
