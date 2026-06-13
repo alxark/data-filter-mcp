@@ -75,6 +75,7 @@ SAFE_BUILTINS: dict[str, Any] = {
     "sum": sum,
     "tuple": tuple,
     "zip": zip,
+    "isinstance": isinstance,
 }
 
 SAFE_METHODS = {
@@ -280,6 +281,7 @@ SAFE_METHODS = {
     "sha384",
     "sha512",
     "shorten",
+    "sort",
     "span",
     "split",
     "splitlines",
@@ -355,6 +357,8 @@ ALLOWED_NODE_TYPES = {
     ast.Constant,
     ast.List,
     ast.Tuple,
+    ast.Try,
+    ast.ExceptHandler,
     ast.Set,
     ast.Dict,
     ast.Subscript,
