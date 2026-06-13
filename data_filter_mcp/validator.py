@@ -56,6 +56,10 @@ SAFE_ATTRIBUTE_READS = {
     ("itertools", "chain"),
 }
 
+SAFE_DUNDER_ATTRIBUTES = {
+    "__name__",
+}
+
 SAFE_BUILTINS: dict[str, Any] = {
     "all": all,
     "any": any,
@@ -71,11 +75,14 @@ SAFE_BUILTINS: dict[str, Any] = {
     "range": range,
     "reversed": reversed,
     "sorted": sorted,
+    "set": set,
     "str": str,
     "sum": sum,
     "tuple": tuple,
+    "type": type,
     "zip": zip,
     "isinstance": isinstance,
+    "Exception": Exception,
 }
 
 SAFE_METHODS = {
@@ -476,14 +483,21 @@ class FilterValidator(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
-        if node.attr.startswith("_"):
+        is_safe_dunder = node.attr in SAFE_DUNDER_ATTRIBUTES
+        if node.attr.startswith("_") and not is_safe_dunder:
             raise FilterValidationError(f"Attribute access is not allowed: {node.attr}")
 
         parent = self._parents.get(id(node))
         if self._is_safe_attribute_read(node):
             return
 
-        if not isinstance(parent, ast.Call) or parent.func is not node:
+        is_call_target = isinstance(parent, ast.Call) and parent.func is node
+
+        if is_safe_dunder and not is_call_target:
+            self.visit(node.value)
+            return
+
+        if not is_call_target:
             raise FilterValidationError(
                 "Attribute access is restricted to approved method calls"
             )
