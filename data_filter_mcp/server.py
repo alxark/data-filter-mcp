@@ -239,7 +239,7 @@ def create_mcp_server(service: FilterService | None = None) -> FastMCP:
         The function must return a text result (str). The returned text may contain any
         format you want, such as plain text, YAML, CSV-like text, or a custom report.
 
-        Preloaded standard-library modules:
+        Preloaded standard-library modules (don't try to import them in your functions):
         - json, yaml, re
         - math, statistics, datetime, decimal
         - collections, itertools, functools, operator

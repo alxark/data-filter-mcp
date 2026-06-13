@@ -144,6 +144,46 @@ def test_compile_filter_rejects_attribute_reads() -> None:
         compile_filter(code)
 
 
+def test_compile_filter_allows_dunder_name_attribute() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return type(data).__name__
+        """
+    )
+
+    filter_fn = compile_filter(code)
+
+    assert filter_fn([1, 2, 3]) == "list"
+    assert filter_fn({"k": 1}) == "dict"
+    assert filter_fn("hello") == "str"
+
+
+def test_compile_filter_allows_dunder_name_in_lambda() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return ",".join(sorted([type(item).__name__ for item in data]))
+        """
+    )
+
+    filter_fn = compile_filter(code)
+
+    assert filter_fn([1, "x", 2.0]) == "float,int,str"
+
+
+def test_compile_filter_rejects_calling_dunder_name() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return data.__name__()
+        """
+    )
+
+    with pytest.raises(FilterValidationError, match="Method is not allowed: __name__"):
+        compile_filter(code)
+
+
 def test_compile_filter_rejects_string_format_methods() -> None:
     code = textwrap.dedent(
         """
