@@ -559,6 +559,61 @@ def test_compile_filter_allows_re_compile_chain() -> None:
         (
             """
             def filter_item(data):
+                addr = ipaddress.ip_address(data)
+                return str(addr.is_private)
+            """,
+            "192.168.0.1",
+            "True",
+        ),
+        (
+            """
+            def filter_item(data):
+                net = ipaddress.ip_network(data)
+                return str(net.network_address)
+            """,
+            "10.0.0.0/24",
+            "10.0.0.0",
+        ),
+        (
+            """
+            def filter_item(data):
+                net = ipaddress.ip_network(data)
+                return net.with_prefixlen
+            """,
+            "10.0.0.0/24",
+            "10.0.0.0/24",
+        ),
+        (
+            """
+            def filter_item(data):
+                outer = ipaddress.ip_network(data)
+                inner = ipaddress.ip_network("10.0.0.0/25")
+                return str(list(outer.address_exclude(inner))[0])
+            """,
+            "10.0.0.0/24",
+            "10.0.0.128/25",
+        ),
+        (
+            """
+            def filter_item(data):
+                first = ipaddress.ip_network("10.0.0.0/25")
+                second = ipaddress.ip_network("10.0.0.128/25")
+                return str(list(ipaddress.collapse_addresses([first, second]))[0])
+            """,
+            None,
+            "10.0.0.0/24",
+        ),
+        (
+            """
+            def filter_item(data):
+                return str(ipaddress.ip_address(data).version)
+            """,
+            "::1",
+            "6",
+        ),
+        (
+            """
+            def filter_item(data):
                 return unicodedata.category(data)
             """,
             "A",
@@ -666,3 +721,76 @@ def test_compile_filter_rejects_methodcaller_in_json_object_hook() -> None:
         FilterValidationError, match="Method is not allowed: methodcaller"
     ):
         compile_filter(code)
+
+
+def test_validation_error_reports_blocked_name_details() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return eval(data)
+        """
+    )
+
+    with pytest.raises(FilterValidationError, match="blocked_value='eval'") as exc_info:
+        compile_filter(code)
+
+    exc = exc_info.value
+    assert exc.blocked_kind == "disallowed_name"
+    assert exc.blocked_field == "name"
+    assert exc.blocked_value == "eval"
+    assert exc.source_fragment == "eval"
+    assert exc.source_line == 3
+
+
+def test_validation_error_reports_blocked_attribute_read_details() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return str(data.secret)
+        """
+    )
+
+    with pytest.raises(FilterValidationError, match="blocked_value='secret'") as exc_info:
+        compile_filter(code)
+
+    exc = exc_info.value
+    assert exc.blocked_kind == "disallowed_attribute_read"
+    assert exc.blocked_field == "attribute"
+    assert exc.blocked_value == "secret"
+    assert exc.source_fragment == "data.secret"
+    assert exc.source_line == 3
+
+
+def test_validation_error_reports_signature_details() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(item, extra):
+            return "bad"
+        """
+    )
+
+    with pytest.raises(FilterValidationError, match="blocked_field='parameters'") as exc_info:
+        compile_filter(code)
+
+    exc = exc_info.value
+    assert exc.blocked_kind == "invalid_function_signature"
+    assert exc.blocked_field == "parameters"
+    assert "item" in (exc.blocked_value or "")
+    assert "extra" in (exc.blocked_value or "")
+
+
+def test_validation_error_reports_double_star_keyword_details() -> None:
+    code = textwrap.dedent(
+        """
+        def filter_item(data):
+            return dict(**data)
+        """
+    )
+
+    with pytest.raises(FilterValidationError, match=r"blocked_value='\*\*'") as exc_info:
+        compile_filter(code)
+
+    exc = exc_info.value
+    assert exc.blocked_kind == "disallowed_keyword_argument"
+    assert exc.blocked_field == "keyword"
+    assert exc.blocked_value == "**"
