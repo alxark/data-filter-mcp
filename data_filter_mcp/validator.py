@@ -60,6 +60,39 @@ SAFE_DUNDER_ATTRIBUTES = {
     "__name__",
 }
 
+SAFE_PROPERTY_READS = {
+    "broadcast_address",
+    "compressed",
+    "exploded",
+    "hostmask",
+    "ip",
+    "ipv4_mapped",
+    "ipv6_mapped",
+    "is_global",
+    "is_link_local",
+    "is_loopback",
+    "is_multicast",
+    "is_private",
+    "is_reserved",
+    "is_site_local",
+    "is_unspecified",
+    "max_prefixlen",
+    "netmask",
+    "network",
+    "network_address",
+    "num_addresses",
+    "packed",
+    "prefixlen",
+    "reverse_pointer",
+    "scope_id",
+    "sixtofour",
+    "teredo",
+    "version",
+    "with_hostmask",
+    "with_netmask",
+    "with_prefixlen",
+}
+
 SAFE_BUILTINS: dict[str, Any] = {
     "all": all,
     "any": any,
@@ -95,6 +128,7 @@ SAFE_METHODS = {
     "SequenceMatcher",
     "append",
     "appendleft",
+    "address_exclude",
     "abs",
     "accumulate",
     "add",
@@ -116,6 +150,7 @@ SAFE_METHODS = {
     "chain",
     "ChainMap",
     "cmp_to_key",
+    "collapse_addresses",
     "comb",
     "combinations",
     "combinations_with_replacement",
@@ -169,6 +204,7 @@ SAFE_METHODS = {
     "gcd",
     "ge",
     "geometric_mean",
+    "get_mixed_type_key",
     "get",
     "get_close_matches",
     "get_matching_blocks",
@@ -303,6 +339,7 @@ SAFE_METHODS = {
     "subnets",
     "subn",
     "subtract",
+    "summarize_address_range",
     "supernet",
     "supernet_of",
     "swapcase",
@@ -328,6 +365,8 @@ SAFE_METHODS = {
     "utcnow",
     "values",
     "variance",
+    "v4_int_to_packed",
+    "v6_int_to_packed",
     "weekday",
     "wrap",
     "wraps",
@@ -412,8 +451,65 @@ ALLOWED_NODE_TYPES = {
 }
 
 
+def _source_fragment(node: ast.AST | None, max_length: int = 200) -> str | None:
+    if node is None:
+        return None
+    try:
+        fragment = ast.unparse(node)
+    except Exception:
+        return None
+    if len(fragment) > max_length:
+        return f"{fragment[: max_length - 3]}..."
+    return fragment
+
+
+def _node_line(node: ast.AST | None) -> int | None:
+    return getattr(node, "lineno", None)
+
+
+def _node_column(node: ast.AST | None) -> int | None:
+    return getattr(node, "col_offset", None)
+
+
 class FilterValidationError(ValueError):
     """Raised when submitted filter code breaks the policy."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        blocked_kind: str | None = None,
+        blocked_field: str | None = None,
+        blocked_value: str | None = None,
+        source_fragment: str | None = None,
+        source_line: int | None = None,
+        source_column: int | None = None,
+    ) -> None:
+        self.blocked_kind = blocked_kind
+        self.blocked_field = blocked_field
+        self.blocked_value = blocked_value
+        self.source_fragment = source_fragment
+        self.source_line = source_line
+        self.source_column = source_column
+
+        details = []
+        if blocked_kind is not None:
+            details.append(f"blocked_kind={blocked_kind!r}")
+        if blocked_field is not None:
+            details.append(f"blocked_field={blocked_field!r}")
+        if blocked_value is not None:
+            details.append(f"blocked_value={blocked_value!r}")
+        if source_fragment is not None:
+            details.append(f"source_fragment={source_fragment!r}")
+        if source_line is not None:
+            details.append(f"source_line={source_line}")
+        if source_column is not None:
+            details.append(f"source_column={source_column}")
+
+        if details:
+            message = f"{message} ({', '.join(details)})"
+
+        super().__init__(message)
 
 
 class FilterValidator(ast.NodeVisitor):
@@ -433,27 +529,66 @@ class FilterValidator(ast.NodeVisitor):
     def generic_visit(self, node: ast.AST) -> None:
         if type(node) not in ALLOWED_NODE_TYPES:
             raise FilterValidationError(
-                f"{type(node).__name__} is not allowed in filter code"
+                f"{type(node).__name__} is not allowed in filter code",
+                blocked_kind="disallowed_node_type",
+                blocked_field="node_type",
+                blocked_value=type(node).__name__,
+                source_fragment=_source_fragment(node),
+                source_line=_node_line(node),
+                source_column=_node_column(node),
             )
         super().generic_visit(node)
 
     def visit_Module(self, node: ast.Module) -> None:
         if len(node.body) != 1 or not isinstance(node.body[0], ast.FunctionDef):
             raise FilterValidationError(
-                "Filter code must contain exactly one top-level function definition"
+                "Filter code must contain exactly one top-level function definition",
+                blocked_kind="invalid_module_body",
+                blocked_field="top_level_nodes",
+                blocked_value=str(len(node.body)),
+                source_fragment=_source_fragment(node),
             )
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         if node.decorator_list:
-            raise FilterValidationError("Decorators are not allowed")
+            raise FilterValidationError(
+                "Decorators are not allowed",
+                blocked_kind="disallowed_decorator",
+                blocked_field="decorator",
+                blocked_value=", ".join(
+                    fragment
+                    for fragment in (
+                        _source_fragment(decorator)
+                        for decorator in node.decorator_list
+                    )
+                    if fragment is not None
+                ),
+                source_fragment=_source_fragment(node),
+                source_line=_node_line(node),
+                source_column=_node_column(node),
+            )
         if node.returns is not None:
-            raise FilterValidationError("Return annotations are not allowed")
+            raise FilterValidationError(
+                "Return annotations are not allowed",
+                blocked_kind="disallowed_return_annotation",
+                blocked_field="return_annotation",
+                blocked_value=_source_fragment(node.returns),
+                source_fragment=_source_fragment(node),
+                source_line=_node_line(node),
+                source_column=_node_column(node),
+            )
 
         if isinstance(self._parents.get(id(node)), ast.Module):
             if node.name != "filter_item":
                 raise FilterValidationError(
-                    "Filter function must be named filter_item"
+                    "Filter function must be named filter_item",
+                    blocked_kind="invalid_function_name",
+                    blocked_field="function_name",
+                    blocked_value=node.name,
+                    source_fragment=_source_fragment(node),
+                    source_line=_node_line(node),
+                    source_column=_node_column(node),
                 )
 
             args = node.args
@@ -467,25 +602,53 @@ class FilterValidator(ast.NodeVisitor):
                 or args.kw_defaults
             ):
                 raise FilterValidationError(
-                    "filter_item must have exactly one parameter named data"
+                    "filter_item must have exactly one parameter named data",
+                    blocked_kind="invalid_function_signature",
+                    blocked_field="parameters",
+                    blocked_value=self._signature_summary(args),
+                    source_fragment=_source_fragment(node.args),
+                    source_line=_node_line(node),
+                    source_column=_node_column(node),
                 )
         else:
             if node.name.startswith("__"):
                 raise FilterValidationError(
-                    f"Nested function name is not allowed: {node.name}"
+                    f"Nested function name is not allowed: {node.name}",
+                    blocked_kind="disallowed_nested_function_name",
+                    blocked_field="function_name",
+                    blocked_value=node.name,
+                    source_fragment=_source_fragment(node),
+                    source_line=_node_line(node),
+                    source_column=_node_column(node),
                 )
 
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
         if node.id in DISALLOWED_NAMES or node.id.startswith("__"):
-            raise FilterValidationError(f"Name is not allowed: {node.id}")
+            raise FilterValidationError(
+                f"Name is not allowed: {node.id}",
+                blocked_kind="disallowed_name",
+                blocked_field="name",
+                blocked_value=node.id,
+                source_fragment=_source_fragment(node),
+                source_line=_node_line(node),
+                source_column=_node_column(node),
+            )
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         is_safe_dunder = node.attr in SAFE_DUNDER_ATTRIBUTES
         if node.attr.startswith("_") and not is_safe_dunder:
-            raise FilterValidationError(f"Attribute access is not allowed: {node.attr}")
+            raise FilterValidationError(
+                f"Attribute access is not allowed: {node.attr}",
+                blocked_kind="disallowed_attribute",
+                blocked_field="attribute",
+                blocked_value=node.attr,
+                source_fragment=_source_fragment(node),
+                source_line=_node_line(node),
+                source_column=_node_column(node),
+            )
 
         parent = self._parents.get(id(node))
         if self._is_safe_attribute_read(node):
@@ -498,11 +661,28 @@ class FilterValidator(ast.NodeVisitor):
             return
 
         if not is_call_target:
+            if node.attr in SAFE_PROPERTY_READS:
+                self.visit(node.value)
+                return
             raise FilterValidationError(
-                "Attribute access is restricted to approved method calls"
+                "Attribute access is restricted to approved method calls",
+                blocked_kind="disallowed_attribute_read",
+                blocked_field="attribute",
+                blocked_value=node.attr,
+                source_fragment=_source_fragment(node),
+                source_line=_node_line(node),
+                source_column=_node_column(node),
             )
         if node.attr not in SAFE_METHODS:
-            raise FilterValidationError(f"Method is not allowed: {node.attr}")
+            raise FilterValidationError(
+                f"Method is not allowed: {node.attr}",
+                blocked_kind="disallowed_method",
+                blocked_field="method",
+                blocked_value=node.attr,
+                source_fragment=_source_fragment(node),
+                source_line=_node_line(node),
+                source_column=_node_column(node),
+            )
 
         self.visit(node.value)
 
@@ -512,31 +692,86 @@ class FilterValidator(ast.NodeVisitor):
                 node.func.id not in SAFE_BUILTINS
                 and node.func.id not in self._defined_function_names
             ):
+                blocked_kind = (
+                    "disallowed_name"
+                    if node.func.id in DISALLOWED_NAMES
+                    or node.func.id.startswith("__")
+                    else "disallowed_function"
+                )
+                blocked_node = node.func if blocked_kind == "disallowed_name" else node
                 raise FilterValidationError(
-                    f"Calling this function is not allowed: {node.func.id}"
+                    f"Calling this function is not allowed: {node.func.id}",
+                    blocked_kind=blocked_kind,
+                    blocked_field=(
+                        "name" if blocked_kind == "disallowed_name" else "function"
+                    ),
+                    blocked_value=node.func.id,
+                    source_fragment=_source_fragment(blocked_node),
+                    source_line=_node_line(blocked_node),
+                    source_column=_node_column(blocked_node),
                 )
             self.visit(node.func)
         elif isinstance(node.func, ast.Attribute):
             self.visit(node.func)
         else:
-            raise FilterValidationError("Only whitelisted function calls are allowed")
+            raise FilterValidationError(
+                "Only whitelisted function calls are allowed",
+                blocked_kind="disallowed_call_target",
+                blocked_field="function",
+                blocked_value=_source_fragment(node.func) or type(node.func).__name__,
+                source_fragment=_source_fragment(node),
+                source_line=_node_line(node),
+                source_column=_node_column(node),
+            )
 
         for arg in node.args:
             if isinstance(arg, ast.Starred):
-                raise FilterValidationError("Starred arguments are not allowed")
+                raise FilterValidationError(
+                    "Starred arguments are not allowed",
+                    blocked_kind="disallowed_argument",
+                    blocked_field="argument",
+                    blocked_value=_source_fragment(arg),
+                    source_fragment=_source_fragment(node),
+                    source_line=_node_line(arg),
+                    source_column=_node_column(arg),
+                )
             self.visit(arg)
 
         for keyword in node.keywords:
             if keyword.arg is None:
                 raise FilterValidationError(
-                    "Double-star keyword arguments are not allowed"
+                    "Double-star keyword arguments are not allowed",
+                    blocked_kind="disallowed_keyword_argument",
+                    blocked_field="keyword",
+                    blocked_value="**",
+                    source_fragment=_source_fragment(node),
+                    source_line=_node_line(keyword.value),
+                    source_column=_node_column(keyword.value),
                 )
             self.visit(keyword)
 
     def visit_comprehension(self, node: ast.comprehension) -> None:
         if node.is_async:
-            raise FilterValidationError("Async comprehensions are not allowed")
+            raise FilterValidationError(
+                "Async comprehensions are not allowed",
+                blocked_kind="disallowed_async_comprehension",
+                blocked_field="is_async",
+                blocked_value=str(node.is_async),
+                source_fragment=_source_fragment(node),
+            )
         self.generic_visit(node)
+
+    @staticmethod
+    def _signature_summary(args: ast.arguments) -> str:
+        positional = [arg.arg for arg in args.args]
+        keyword_only = [arg.arg for arg in args.kwonlyargs]
+        vararg = args.vararg.arg if args.vararg is not None else None
+        kwarg = args.kwarg.arg if args.kwarg is not None else None
+        return (
+            f"args={positional!r}, vararg={vararg!r}, "
+            f"kwonlyargs={keyword_only!r}, kwarg={kwarg!r}, "
+            f"defaults={len(args.defaults)}, kw_defaults={len(args.kw_defaults)}"
+        )
 
     @staticmethod
     def _build_parent_map(tree: ast.AST) -> dict[int, ast.AST]:
@@ -570,7 +805,15 @@ def _parse_filter(source_code: str) -> ast.Module:
     try:
         return ast.parse(source_code, mode="exec")
     except SyntaxError as exc:
-        raise FilterValidationError(f"Invalid Python syntax: {exc.msg}") from exc
+        raise FilterValidationError(
+            f"Invalid Python syntax: {exc.msg}",
+            blocked_kind="invalid_syntax",
+            blocked_field="syntax",
+            blocked_value=exc.msg,
+            source_fragment=(exc.text or "").strip() or None,
+            source_line=exc.lineno,
+            source_column=exc.offset,
+        ) from exc
 
 
 def _compile_tree(tree: ast.Module) -> CodeType:
@@ -590,6 +833,11 @@ def compile_filter(source_code: str):
 
     filter_fn = execution_globals.get("filter_item")
     if not callable(filter_fn):
-        raise FilterValidationError("filter_item was not created successfully")
+        raise FilterValidationError(
+            "filter_item was not created successfully",
+            blocked_kind="missing_filter_function",
+            blocked_field="function_name",
+            blocked_value="filter_item",
+        )
 
     return filter_fn
