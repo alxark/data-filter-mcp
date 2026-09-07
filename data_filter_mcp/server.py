@@ -239,7 +239,8 @@ def create_mcp_server(service: FilterService | None = None) -> FastMCP:
         The function must return a text result (str). The returned text may contain any
         format you want, such as plain text, YAML, CSV-like text, or a custom report.
 
-        Preloaded standard-library modules (don't try to import them in your functions):
+        Preloaded modules (no imports needed; redundant import statements for
+        these modules are accepted, including aliases):
         - json, yaml, re
         - math, statistics, datetime, decimal
         - collections, itertools, functools, operator
@@ -247,13 +248,14 @@ def create_mcp_server(service: FilterService | None = None) -> FastMCP:
 
         Safety rules:
         - The code is validated against a restricted Python subset
-        - Imports, network access, dynamic execution, and unsafe attribute access are rejected
+        - Imports of other modules and all from-imports are rejected
+        - Network access, dynamic execution, and unsafe attribute access are rejected
         - Registered filters are stored in memory only and expire automatically after a server-side TTL
 
         Forbidden:
         - Using non-standard libraries or modules
         - Accessing the filesystem, network, or environment variables
-        - Defining multiple top-level functions, classes, or module-level code
+        - Defining multiple top-level functions, classes, or module-level code other than redundant imports
         - Using dynamic features like eval, exec, or __import__
 
         Args:
