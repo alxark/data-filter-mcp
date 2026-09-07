@@ -23,7 +23,7 @@ from typing import Any
 
 import yaml
 
-POLICY_VERSION = "1.3"
+POLICY_VERSION = "1.4"
 
 SAFE_MODULES: dict[str, Any] = {
     "base64": base64,
@@ -513,7 +513,8 @@ class FilterValidationError(ValueError):
 
 
 class FilterValidator(ast.NodeVisitor):
-    def __init__(self) -> None:
+    def __init__(self, module_aliases: dict[int, dict[str, str]] | None = None) -> None:
+        self._module_aliases = module_aliases or {}
         self._parents: dict[int, ast.AST] = {}
         self._defined_function_names: set[str] = set()
 
@@ -798,7 +799,88 @@ class FilterValidator(ast.NodeVisitor):
         if isinstance(parent, ast.Call) and parent.func is node:
             return False
         path = self._attribute_path(node)
+        if path:
+            scope: ast.AST | None = node
+            while scope is not None:
+                aliases = self._module_aliases.get(id(scope), {})
+                if path[0] in aliases:
+                    path = (aliases[path[0]], *path[1:])
+                    break
+                scope = self._parents.get(id(scope))
         return path in SAFE_ATTRIBUTE_READS
+
+
+class _ImportStripper(ast.NodeTransformer):
+    """Remove redundant imports without executing Python's import machinery."""
+
+    def __init__(self) -> None:
+        self.module_aliases: dict[int, dict[str, str]] = {}
+        self._scope_aliases: dict[str, str] = {}
+        self.global_aliases: dict[str, Any] = {}
+
+    def visit_Module(self, node: ast.Module) -> ast.Module:
+        self.module_aliases[id(node)] = self._scope_aliases
+        body: list[ast.stmt] = []
+        for statement in node.body:
+            if isinstance(statement, ast.Import):
+                self._check_import(statement)
+                for alias in statement.names:
+                    if alias.asname:
+                        self.global_aliases[alias.asname] = SAFE_MODULES[alias.name]
+            else:
+                body.append(statement)
+        node.body = body
+        self.generic_visit(node)
+        return node
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        outer_aliases = self._scope_aliases
+        self._scope_aliases = {}
+        self.module_aliases[id(node)] = self._scope_aliases
+        try:
+            self.generic_visit(node)
+        finally:
+            self._scope_aliases = outer_aliases
+        return node
+
+    def _check_import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            if alias.name not in SAFE_MODULES:
+                self._reject_import(node, alias.name)
+            if alias.asname:
+                # Reuse the existing name restrictions even for removed imports.
+                FilterValidator().visit(ast.copy_location(
+                    ast.Name(id=alias.asname, ctx=ast.Store()), node
+                ))
+                if alias.asname != alias.name:
+                    self._scope_aliases[alias.asname] = alias.name
+
+    def visit_Import(self, node: ast.Import) -> ast.stmt | list[ast.stmt]:
+        self._check_import(node)
+        replacements: list[ast.stmt] = []
+        for alias in node.names:
+            if alias.asname and alias.asname != alias.name:
+                replacements.append(ast.copy_location(ast.Assign(
+                    targets=[ast.Name(id=alias.asname, ctx=ast.Store())],
+                    value=ast.Name(id=alias.name, ctx=ast.Load()),
+                ), node))
+        # A no-op keeps all statement suites valid, including try/finally.
+        return replacements or ast.copy_location(ast.Pass(), node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        self._reject_import(node, "." * node.level + (node.module or ""))
+
+    @staticmethod
+    def _reject_import(node: ast.AST, module_name: str) -> None:
+        raise FilterValidationError(
+            f"Import of module is not allowed: {module_name}",
+            blocked_kind="disallowed_import",
+            blocked_field="module",
+            blocked_value=module_name,
+            source_fragment=_source_fragment(node),
+            source_line=_node_line(node),
+            source_column=_node_column(node),
+        )
 
 
 def _parse_filter(source_code: str) -> ast.Module:
@@ -822,12 +904,15 @@ def _compile_tree(tree: ast.Module) -> CodeType:
 
 def compile_filter(source_code: str):
     tree = _parse_filter(source_code)
-    FilterValidator().validate(tree)
+    stripper = _ImportStripper()
+    tree = ast.fix_missing_locations(stripper.visit(tree))
+    FilterValidator(stripper.module_aliases).validate(tree)
     compiled = _compile_tree(tree)
 
     execution_globals: dict[str, Any] = {
         "__builtins__": SAFE_BUILTINS.copy(),
         **SAFE_MODULES,
+        **stripper.global_aliases,
     }
     exec(compiled, execution_globals, execution_globals)
 

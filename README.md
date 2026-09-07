@@ -11,6 +11,14 @@ Local MCP server that registers restricted Python filters and runs them against 
 
 ### What filter code may use
 
+Allowed modules are preloaded into the filter namespace. Redundant `import json`,
+`import math, re`, and `import datetime as dt` statements are accepted at module
+level and inside functions. They are removed before validation and execution
+(aliases remain available); no actual imports are executed. Imports of other
+modules, dotted module names, and all `from ... import ...` forms remain rejected.
+All other validation rules still apply, including the single top-level function
+requirement. Imports are unnecessary; prefer using the preloaded canonical names.
+
 Filter bodies are AST-validated against a whitelist. In addition to a curated set of builtins (`len`, `sorted`, `max`, `min`, `range`, `enumerate`, `zip`, `sum`, `any`, `all`, conversions, etc.) and safe string/dict/list methods, filters may also use a curated set of standard-library modules. Modules are exposed by their canonical names (`math`, `datetime`, `hashlib`, etc.). Filesystem, process, network, and unsafe serialization modules (`os`, `pathlib`, `shutil`, `subprocess`, `socket`, `urllib`, `pickle`, etc.) are intentionally not available.
 
 - **`lambda` expressions** — typically as `key=` arguments, e.g. `sorted(data, key=lambda item: item.get("score"))`. Lambda bodies are validated by the same rules as the rest of the filter.
