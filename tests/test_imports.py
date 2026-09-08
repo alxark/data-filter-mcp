@@ -157,7 +157,7 @@ def test_service_runs_and_converts_filter_with_imports(tmp_path):
     registered = service.register_filter(
         "import json as j\ndef filter_item(data):\n    import math\n    return j.dumps(math.ceil(len(data) / 2))"
     )
-    assert registered.policy_version == "1.4"
+    assert registered.policy_version == "1.5"
     assert service.run_filter(registered.filter_id, str(source)).result_text == "1"
     service.convert_file(registered.filter_id, str(source), str(destination))
     assert destination.read_text(encoding="utf-8") == "1"

@@ -248,6 +248,7 @@ def create_mcp_server(service: FilterService | None = None) -> FastMCP:
 
         Safety rules:
         - The code is validated against a restricted Python subset
+        - next() (including a default value), assert statements, and catching AssertionError are supported
         - Imports of other modules and all from-imports are rejected
         - Network access, dynamic execution, and unsafe attribute access are rejected
         - Registered filters are stored in memory only and expire automatically after a server-side TTL

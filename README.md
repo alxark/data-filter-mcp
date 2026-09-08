@@ -19,7 +19,9 @@ modules, dotted module names, and all `from ... import ...` forms remain rejecte
 All other validation rules still apply, including the single top-level function
 requirement. Imports are unnecessary; prefer using the preloaded canonical names.
 
-Filter bodies are AST-validated against a whitelist. In addition to a curated set of builtins (`len`, `sorted`, `max`, `min`, `range`, `enumerate`, `zip`, `sum`, `any`, `all`, conversions, etc.) and safe string/dict/list methods, filters may also use a curated set of standard-library modules. Modules are exposed by their canonical names (`math`, `datetime`, `hashlib`, etc.). Filesystem, process, network, and unsafe serialization modules (`os`, `pathlib`, `shutil`, `subprocess`, `socket`, `urllib`, `pickle`, etc.) are intentionally not available.
+Filter bodies are AST-validated against a whitelist. In addition to a curated set of builtins (`len`, `sorted`, `max`, `min`, `next`, `range`, `enumerate`, `zip`, `sum`, `any`, `all`, conversions, etc.) and safe string/dict/list methods, filters may also use a curated set of standard-library modules. Modules are exposed by their canonical names (`math`, `datetime`, `hashlib`, etc.). Filesystem, process, network, and unsafe serialization modules (`os`, `pathlib`, `shutil`, `subprocess`, `socket`, `urllib`, `pickle`, etc.) are intentionally not available.
+
+Filters support `next(generator)` and `next(generator, default)`, as well as `assert` statements (with optional messages) and catching `AssertionError`. Assertions are disabled when the server runs with Python optimization (`-O` or `-OO`); do not use optimized mode when relying on assertions for validation.
 
 - **`lambda` expressions** — typically as `key=` arguments, e.g. `sorted(data, key=lambda item: item.get("score"))`. Lambda bodies are validated by the same rules as the rest of the filter.
 - **`json`** — `json.loads`, `json.dumps`.

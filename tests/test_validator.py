@@ -7,6 +7,105 @@ import pytest
 from data_filter_mcp.validator import FilterValidationError, compile_filter
 
 
+def test_compile_filter_allows_next_builtin() -> None:
+    filter_fn = compile_filter(textwrap.dedent("""
+        def filter_item(data):
+            return next(g for g in data['groups'] if g['name'] == 'x')['value']
+    """))
+    assert filter_fn({'groups': [{'name': 'other'}, {'name': 'x', 'value': 'found'}]}) == 'found'
+    with pytest.raises(StopIteration):
+        filter_fn({'groups': []})
+
+    with_default = compile_filter(textwrap.dedent("""
+        def filter_item(data):
+            return str(next((g for g in data), None))
+    """))
+    assert with_default([]) == 'None'
+    assert with_default(['found']) == 'found'
+
+
+@pytest.mark.parametrize('message', ['', ', "invalid data"'])
+def test_compile_filter_allows_assert_statement(message: str) -> None:
+    filter_fn = compile_filter(
+        f'def filter_item(data):\n    assert data{message}\n    return "valid"\n'
+    )
+    assert filter_fn(True) == 'valid'
+    with pytest.raises(AssertionError) as exc_info:
+        filter_fn(False)
+    assert str(exc_info.value) == ('invalid data' if message else '')
+
+
+def test_compile_filter_allows_catching_assertion_error() -> None:
+    filter_fn = compile_filter(textwrap.dedent("""
+        def filter_item(data):
+            try:
+                assert False, 'invalid data'
+            except AssertionError:
+                return 'caught'
+    """))
+    assert filter_fn(None) == 'caught'
+
+
+@pytest.mark.parametrize('statement', ['assert open("secret")', 'assert False, open("secret")'])
+def test_compile_filter_validates_assert_children(statement: str) -> None:
+    with pytest.raises(FilterValidationError) as exc_info:
+        compile_filter(f'def filter_item(data):\n    {statement}\n    return "ok"\n')
+    assert exc_info.value.blocked_kind == 'disallowed_name'
+    assert exc_info.value.blocked_value == 'open'
+
+
+def test_compile_filter_still_rejects_global_statement() -> None:
+    with pytest.raises(FilterValidationError) as exc_info:
+        compile_filter('def filter_item(data):\n    global value\n    return "ok"\n')
+    assert exc_info.value.blocked_kind == 'disallowed_node_type'
+    assert exc_info.value.blocked_value == 'Global'
+
+
+@pytest.mark.parametrize('use_next', [True, False])
+def test_compile_filter_validates_slo_rules(use_next: bool) -> None:
+    prefix = 'sloth-slo-'
+    suffix = '-tailscale-corpnetwork-latency-china'
+    meta_name = prefix + 'meta-recordings' + suffix
+    alerts_name = prefix + 'alerts' + suffix
+    lookup = (
+        "next(g for g in groups if g['name'] == {name!r})"
+        if use_next else "groups[{name!r}]"
+    )
+    groups = "data['groups']" if use_next else "{g['name']: g for g in data['groups']}"
+    code = textwrap.dedent(f"""
+        def filter_item(data):
+            groups = {groups}
+            meta = {lookup.format(name=meta_name)}
+            rules = {{r['record']: r for r in meta['rules']}}
+            assert rules['slo:objective:ratio']['expr'] == 'vector(0.95)'
+            assert rules['slo:error_budget:ratio']['expr'] == 'vector(1-0.95)'
+            assert rules['sloth_slo_info']['labels']['sloth_objective'] == '95'
+            alerts = {lookup.format(name=alerts_name)}['rules']
+            assert len(alerts) == 2
+            for r in alerts:
+                assert r['expr'].count('* 0.05') == 4
+                assert '* 0.01' not in r['expr']
+            return 'PASS: YAML parsed; China objective=95%, budget=5%, all 8 alert thresholds updated.'
+    """)
+    data = {'groups': [
+        {'name': meta_name, 'rules': [
+            {'record': 'slo:objective:ratio', 'expr': 'vector(0.95)'},
+            {'record': 'slo:error_budget:ratio', 'expr': 'vector(1-0.95)'},
+            {'record': 'sloth_slo_info', 'labels': {'sloth_objective': '95'}},
+        ]},
+        {'name': alerts_name, 'rules': [
+            {'expr': ' + '.join(['value * 0.05'] * 4)} for _ in range(2)
+        ]},
+    ]}
+    filter_fn = compile_filter(code)
+    assert filter_fn(data) == (
+        'PASS: YAML parsed; China objective=95%, budget=5%, all 8 alert thresholds updated.'
+    )
+    data['groups'][1]['rules'][0]['expr'] = 'value * 0.01'
+    with pytest.raises(AssertionError):
+        filter_fn(data)
+
+
 def test_compile_filter_accepts_valid_code() -> None:
     code = textwrap.dedent(
         """
