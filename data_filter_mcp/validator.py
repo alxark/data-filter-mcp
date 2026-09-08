@@ -23,7 +23,7 @@ from typing import Any
 
 import yaml
 
-POLICY_VERSION = "1.4"
+POLICY_VERSION = "1.5"
 
 SAFE_MODULES: dict[str, Any] = {
     "base64": base64,
@@ -105,6 +105,7 @@ SAFE_BUILTINS: dict[str, Any] = {
     "list": list,
     "max": max,
     "min": min,
+    "next": next,
     "range": range,
     "reversed": reversed,
     "sorted": sorted,
@@ -116,6 +117,7 @@ SAFE_BUILTINS: dict[str, Any] = {
     "zip": zip,
     "isinstance": isinstance,
     "Exception": Exception,
+    "AssertionError": AssertionError,
 }
 
 SAFE_METHODS = {
@@ -390,6 +392,7 @@ ALLOWED_NODE_TYPES = {
     ast.arg,
     ast.Return,
     ast.Assign,
+    ast.Assert,
     ast.AugAssign,
     ast.For,
     ast.While,
