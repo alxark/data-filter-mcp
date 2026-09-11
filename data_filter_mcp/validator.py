@@ -193,6 +193,7 @@ SAFE_METHODS = {
     "filterfalse",
     "find",
     "findall",
+    "finditer",
     "floor",
     "floordiv",
     "fmean",

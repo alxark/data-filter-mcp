@@ -26,7 +26,7 @@ Filters support `next(generator)` and `next(generator, default)`, as well as `as
 - **`lambda` expressions** — typically as `key=` arguments, e.g. `sorted(data, key=lambda item: item.get("score"))`. Lambda bodies are validated by the same rules as the rest of the filter.
 - **`json`** — `json.loads`, `json.dumps`.
 - **`yaml`** — `yaml.safe_load`, `yaml.safe_dump`. The unsafe `yaml.load` / `yaml.dump` are intentionally not exposed.
-- **`re`** — `re.match`, `re.search`, `re.fullmatch`, `re.findall`, `re.sub`, `re.subn`, `re.compile`, `re.escape`, plus `Match` / `Pattern` methods (`group`, `groups`, `groupdict`, `start`, `end`, `span`).
+- **`re`** — `re.match`, `re.search`, `re.fullmatch`, `re.findall`, `re.finditer`, `re.sub`, `re.subn`, `re.compile`, `re.escape`, plus `Match` / `Pattern` methods (`group`, `groups`, `groupdict`, `start`, `end`, `span`). `re.finditer` returns a lazy iterator of `Match` objects; it can be iterated with `for`, materialized with `list(...)`, or advanced with `next(...)`.
 - **`math`** — numeric helpers such as `math.ceil`, `math.floor`, `math.sqrt`, `math.log`, `math.exp`, `math.pow`, `math.factorial`, `math.gcd`, `math.lcm`, `math.isfinite`, `math.isclose`.
 - **`statistics`** — aggregates such as `statistics.mean`, `statistics.median`, `statistics.stdev`, `statistics.variance`, `statistics.quantiles`.
 - **`datetime`** — `datetime.datetime.fromisoformat`, `datetime.datetime.now`, `datetime.timedelta`, `datetime.timezone.utc`, and instance methods such as `isoformat`, `strftime`, `timestamp`, `weekday`, `total_seconds`. General instance attribute reads such as `dt.year` and `dt.month` are not supported by the current policy.

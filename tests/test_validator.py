@@ -428,6 +428,38 @@ def test_compile_filter_allows_re_search_and_group() -> None:
     assert filter_fn("order #4242 received") == "4242"
 
 
+def test_compile_filter_allows_re_finditer() -> None:
+    code = textwrap.dedent(
+        r"""
+        import re
+        def filter_item(data):
+            spans = []
+            for match in re.finditer(r"\d+", data):
+                spans.append(str(match.start()) + ":" + match.group(0))
+            return ",".join(spans)
+        """
+    )
+
+    filter_fn = compile_filter(code)
+    assert filter_fn("a1 b22 c333") == "1:1,4:22,8:333"
+    assert filter_fn("no matches") == ""
+
+
+def test_compile_filter_allows_pattern_finditer_with_list() -> None:
+    code = textwrap.dedent(
+        r"""
+        def filter_item(data):
+            pattern = re.compile(r"(\w)=(\d+)")
+            matches = list(pattern.finditer(data))
+            return ";".join([m.group(1) + "->" + m.group(2) for m in matches])
+        """
+    )
+
+    filter_fn = compile_filter(code)
+    assert filter_fn("a=1 b=22") == "a->1;b->22"
+    assert filter_fn("no matches") == ""
+
+
 def test_compile_filter_allows_re_findall_and_sub() -> None:
     code = textwrap.dedent(
         """
